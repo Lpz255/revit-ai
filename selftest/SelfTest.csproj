@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>RevitAI.SelfTest</AssemblyName>
+    <RootNamespace>RevitAI</RootNamespace>
+    <OutputPath>..\dist\selftest\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\src\BridgeServer.cs" />
+    <Compile Include="..\src\MiniHttp.cs" />
+    <Compile Include="..\src\Json.cs" />
+    <Compile Include="..\src\IBridgeHandler.cs" />
+    <Compile Include="..\src\Log.cs" />
+    <Compile Include="..\src\BuildInfo.cs" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+</Project>

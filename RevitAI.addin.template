@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>RevitAI Bridge</Name>
+    <Assembly>{{DLL_PATH}}</Assembly>
+    <AddInId>7E2C1B44-9F3A-4C21-8D77-2B5E0A6C1F01</AddInId>
+    <FullClassName>RevitAI.App</FullClassName>
+    <VendorId>DSH</VendorId>
+    <VendorDescription>Local AI modeling bridge for Revit</VendorDescription>
+  </AddIn>
+</RevitAddIns>

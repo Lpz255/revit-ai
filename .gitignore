@@ -1,0 +1,15 @@
+# build output
+dist/
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# local runtime
+logs/
+RevitAI.addin
+
+# python
+__pycache__/
+*.pyc
