@@ -12,13 +12,14 @@ namespace RevitAI
 
         public Result OnStartup(UIControlledApplication application)
         {
+            Log.Info("OnStartup begin (v" + BuildInfo.Version + ")");
             try
             {
                 string token = TokenStore.LoadOrCreate();
                 Bridge = new RevitEventBridge();
                 Server = new BridgeServer(new RevitCommandHandler(Bridge), 8787, token);
                 Server.Start();
-                Log.Info("RevitAI ready. health: http://127.0.0.1:8787/health ; token: " + TokenStore.TokenPath);
+                Log.Info("RevitAI ready on 127.0.0.1:8787; token file " + TokenStore.TokenPath);
                 return Result.Succeeded;
             }
             catch (Exception ex)
