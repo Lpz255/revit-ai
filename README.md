@@ -1,27 +1,49 @@
 # revit-ai
 
-让 AI 直接驱动 Revit 建模的本地桥。Revit 侧是一个 C# 插件，对外暴露一个只监听 `127.0.0.1` 的极简 HTTP 服务；AI（Claude / Cursor / DeepSeek Harness 等）用 JSON 命令建模，不必实时编译代码进 Revit。
+让 AI 直接驱动 Revit 建模的本地桥。Revit 侧是一个 C# 插件，对外暴露只监听 `127.0.0.1` 的 HTTP 服务；
+再包一层 **MCP server**，Codex / Claude Desktop / Cursor 这类客户端可以直接把它当工具用。
 
-## 为什么是这个架构
-
-- **Revit API 只能进程内调用**，所以必须有插件；
-- 插件用 `ExternalEvent` 把 HTTP 线程的请求编组到 Revit 主线程，**每条命令一个 Transaction**，失败自动回滚；
-- AI 只发结构化 JSON（`wall.create` / `hello` …），不做"生成 C# 再编译"，稳定且可校验；
-- 命令返回元素 ID 与错误信息，AI 才能形成"做—看—改"的闭环。
+## 架构
 
 ```
-AI  --HTTP/JSON-->  127.0.0.1:8787  -->  Revit 插件  --ExternalEvent-->  Revit 主线程
-      (X-Auth-Token)                                      └─ Transaction（可回滚）
+Codex / Claude / Cursor            AI agent
+        │  MCP (stdio, JSON-RPC)
+        ▼
+   mcp/server.py                  17 个工具，零依赖
+        │  HTTP + token
+        ▼
+   Revit 插件 (C#)                ExternalEvent → Revit 主线程
+        └─ 每条命令一个 Transaction（失败回滚）
 ```
+
+为什么必须这样：**Revit API 只能进程内调用**，所以插件是绕不开的；而 AI 不能"生成 C# 再编译进 Revit"，
+所以命令要结构化、可校验、可回滚。
+
+## 实测结果（Revit 2020，中文建筑样板）
+
+一条 `build.school` 生成一所学校：
+
+| 项 | 数量 |
+| --- | --- |
+| 建筑 | 3 栋（2 栋 3 层教学楼 + 1 栋食堂） |
+| 墙 / 柱 | 110 / 192 |
+| 门 / 窗 | 82 / 82 |
+| 房间 | 82 间，合计 4771 m² |
+| 楼板 | 11（含 3 个屋顶 + 场地） |
+| 耗时 | 约 60–90 秒，0 失败 |
 
 ## 进度
 
-- [x] 插件骨架（IExternalApplication）+ HTTP 桥 + Token 鉴权
-- [x] `ping` / `help` / `hello`（文档信息、版本、标高）
-- [x] 建模命令：标高、轴网、墙、楼板、结构柱、族实例、删除
-- [x] 单位统一 mm（内部换算英尺），警告自动吞掉（否则弹窗卡死桥）
-- [ ] Revit 侧联调（首次加载已定位为中文路径问题，改到 ASCII 路径后待验证）
-- [ ] `apply_plan` 批量事务 + MCP 封装
+- [x] 插件骨架 + HTTP 桥 + Token 鉴权
+- [x] 原子命令：标高 / 轴网 / 墙 / 板 / 柱 / 门 / 窗 / 房间 / 删除
+- [x] `apply_plan` 批量单事务（失败整体回滚）
+- [x] `build.block` 整栋楼参数化生成（轴网、走廊、隔墙、门窗、房间、屋顶）
+- [x] `build.school` 多栋 + 场地
+- [x] `view.export` 导出 PNG（AI 可以用它"看"模型）
+- [x] **MCP server**（17 个工具，含 image 返回）
+- [ ] 材质 / 配色（现在 Shading 是默认深灰）
+- [ ] `view.create3d`（自动建三维视图）
+- [ ] 楼梯、卫生间、门厅、场地道路
 
 ## 环境
 
@@ -31,12 +53,10 @@ AI  --HTTP/JSON-->  127.0.0.1:8787  -->  Revit 插件  --ExternalEvent-->  Revit
 | 编译 | .NET SDK 8+ 或 VS 生成工具，需 net472 目标包 |
 | 客户端 | Python 3.8+ |
 
-引用 `RevitAPI.dll` / `RevitAPIUI.dll` 的路径在 `src/RevitAI.csproj` 里，按自己的安装位置改。
-
-> **重要：插件 DLL 不要放在含中文的路径下。** 实测 Revit 2020 在 `E:\0个人文件夹\...` 这类路径上会报
+> **插件 DLL 不要放在含中文的路径下。** 实测 Revit 2020 在 `E:\0个人文件夹\...` 上会报
 > 「无法运行外部应用程序」，journal 里是 `API_ERROR { Starting External Application ... }`，
-> 而同一 DLL 换到 `E:\revit-ai\...` 就能正常加载。`install-addin.bat` 会把 DLL 复制到
-> `%APPDATA%\Autodesk\Revit\Addins\2020\RevitAI\`（纯 ASCII），避免踩这个坑。
+> 同一 DLL 换到 `E:\revit-ai\...` 就能加载。`install-addin.bat` 会把 DLL 复制到
+> `%APPDATA%\Autodesk\Revit\Addins\2020\RevitAI\`（纯 ASCII）。
 
 ## 编译与安装
 
@@ -45,48 +65,51 @@ dotnet build src\RevitAI.csproj -c Release
 install-addin.bat
 ```
 
-`install-addin.bat` 把 `dist\RevitAI.dll` 复制到 `%APPDATA%\Autodesk\Revit\Addins\2020\RevitAI\`，
-并按 `RevitAI.addin.template` 生成 `RevitAI.addin`。
+启动 Revit，首次弹 **「未签名加载项」** → **Always Load**。
+加载成功后 `%LOCALAPPDATA%\RevitAI\` 下会出现 `token.txt` 和 `bridge.log`。
 
-启动 Revit，首次会弹 **“未签名加载项”** 提示，点 **Always Load**。加载成功的话
-`%LOCALAPPDATA%\RevitAI\` 下会出现 `token.txt` 和 `bridge.log`。
+## 用 MCP 驱动（推荐）
 
-## 使用
+见 [mcp/README.md](mcp/README.md)。
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.revit]
+command = "python"
+args = ["E:\\revit-ai\\mcp\\server.py"]
+```
+
+## 直接用 HTTP / Python 客户端
 
 ```bat
 python client\revit.py ping
 python client\revit.py hello
-python tools\smoke.py          :: 只读联调
-python tools\smoke.py --build  :: 画一个 4x3 m 的房间（两面轴网 + 四面墙 + 楼板）
+python tools\school.py      :: 一栋 3 层教学楼
+python tools\campus.py      :: 整个校区
 ```
 
 ## 命令
 
-所有长度单位都是 **mm**。
+所有长度单位 **mm**，返回统一 `{ ok, cmd, data | error, ms }`。
 
-| cmd | 参数 | 说明 |
-| --- | --- | --- |
-| `ping` | – | 探活（不经过 Revit 主线程） |
-| `help` | – | 命令表 |
-| `hello` | – | 文档标题/路径、Revit 版本、标高、元素数 |
-| `levels.list` | – | 标高列表 |
-| `types.list` | `category`: walls/floors/columns/doors/windows | 可用类型名 |
-| `level.create` | `name`, `elevation_mm` | 建标高 |
-| `grid.create` | `p1`, `p2`, `name` | 建轴网 |
-| `wall.create` | `p1`, `p2`, `level`, `height_mm`, `type` | 建墙 |
-| `floor.create` | `points`, `level`, `type` | 建楼板（闭合多边形） |
-| `column.create` | `point`, `level`, `type` | 建结构柱 |
-| `family.place` | `type`, `point`, `level`, `rotation_deg` | 放族实例 |
-| `element.delete` | `ids` | 删除 |
-
-返回统一是 `{ ok, cmd, data \| error, ms }`。
+| cmd | 说明 |
+| --- | --- |
+| `ping` / `help` / `hello` | 探活 / 命令表 / 文档信息 |
+| `levels.list` / `types.list` / `views.list` | 查标高 / 类型 / 视图 |
+| `level.create` / `grid.create` | 建标高 / 轴网 |
+| `wall.create` / `floor.create` / `column.create` | 建墙 / 板 / 柱 |
+| `door.create` / `window.create` | 门窗，宿主到墙并开洞 |
+| `room.create` | 房间（可设层高） |
+| `family.place` / `element.delete` | 放族 / 删构件 |
+| `apply_plan` | 批量，单事务 |
+| `build.block` / `build.school` | 整栋 / 整校区 |
+| `view.export` | 导出 PNG |
 
 ## 安全
 
-- 只绑定 `127.0.0.1`，不监听外网；
-- 每次启动随机生成 48 位 token，写入 `%LOCALAPPDATA%\RevitAI\token.txt`，请求需带 `X-Auth-Token`；
-- 日志：`%LOCALAPPDATA%\RevitAI\bridge.log`；
-- 所有建模命令在 Transaction 内执行，异常回滚；警告自动吞掉避免弹窗阻塞。
+- 只绑定 `127.0.0.1`；
+- 每次启动随机 48 位 token，写入 `%LOCALAPPDATA%\RevitAI\token.txt`，请求带 `X-Auth-Token`；
+- 所有建模命令在 Transaction 内，异常回滚；警告自动吞掉，避免弹窗卡死桥。
 
 ## License
 
